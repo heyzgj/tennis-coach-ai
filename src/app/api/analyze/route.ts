@@ -21,6 +21,8 @@ export async function POST(request: NextRequest) {
     }
     const metrics = JSON.parse(metricsString);
 
+    console.log('metrics', JSON.stringify(metrics));
+    
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: MODEL_NAME });
 
