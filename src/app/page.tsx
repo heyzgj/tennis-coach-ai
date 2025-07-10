@@ -1,103 +1,126 @@
-import Image from "next/image";
+// src/app/page.tsx
+'use client';
+
+import { useTennisCoach } from '@/hooks/useTennisCoach';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Loader2, Mic, Play, Square, Target } from 'lucide-react';
+import { useCallback, useRef, useEffect } from 'react';
+
+// A self-contained CameraFeed component
+const CameraFeed = ({ onFrame, isDetecting }: { onFrame: (video: HTMLVideoElement) => void, isDetecting: boolean }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const animationFrameRef = useRef<number>(0);
+
+  const detectionLoop = useCallback(() => {
+    if (videoRef.current) {
+      onFrame(videoRef.current);
+    }
+    animationFrameRef.current = requestAnimationFrame(detectionLoop);
+  }, [onFrame]);
+
+  useEffect(() => {
+    const startCamera = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+          audio: false,
+        });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          animationFrameRef.current = requestAnimationFrame(detectionLoop);
+        }
+      } catch (err) {
+        alert("Camera Error: Could not access camera. Please use a secure (HTTPS) connection and grant permissions.");
+      }
+    };
+
+    const stopCamera = () => {
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      if (videoRef.current && videoRef.current.srcObject) {
+        (videoRef.current.srcObject as MediaStream).getTracks().forEach(track => track.stop());
+      }
+    };
+
+    if (isDetecting) {
+      startCamera();
+    } else {
+      stopCamera();
+    }
+    return () => stopCamera();
+  }, [isDetecting, detectionLoop]);
+
+  return <video ref={videoRef} playsInline muted className="w-full h-full object-cover transform -scale-x-100" />;
+}
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const {
+    status, isDetecting, isAnalyzing, isInitialized, swingCount,
+    analysisResult, startDetection, stopDetection, handleFrame
+  } = useTennisCoach();
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
+  return (
+    <main className="flex min-h-screen w-full flex-col items-center justify-center bg-slate-100 dark:bg-slate-900 p-4 font-sans">
+      <Card className="w-full max-w-2xl shadow-2xl border-slate-200/50 dark:border-slate-700/50">
+        <CardHeader className="text-center pb-4">
+          <CardTitle className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
+            AI Tennis Coach
+          </CardTitle>
+          <p className="text-base text-slate-500 dark:text-slate-400 h-6 transition-all">
+            {status}
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="relative w-full aspect-video bg-slate-900 rounded-xl overflow-hidden mb-6 shadow-inner">
+            <CameraFeed onFrame={handleFrame} isDetecting={isDetecting} />
+            {isDetecting && (
+              <div className="absolute top-3 left-3 flex items-center gap-2 bg-red-600 text-white px-3 py-1 rounded-full text-sm font-bold">
+                <Target className="w-4 h-4" />
+                <span>REC</span>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+              <Button
+                onClick={isDetecting ? stopDetection : startDetection}
+                disabled={!isInitialized || isAnalyzing}
+                size="lg"
+                className={`w-full text-xl font-bold py-8 rounded-xl transition-all duration-300 shadow-lg col-span-2 ${isDetecting ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-600 hover:bg-blue-700'} text-white`}
+              >
+                {isAnalyzing ? <Loader2 className="h-8 w-8 animate-spin" /> : 
+                isDetecting ? <Square className="h-8 w-8 mr-2" /> : 
+                <Play className="h-8 w-8 mr-2" />}
+                {isAnalyzing ? 'Analyzing...' : isDetecting ? 'Stop Session' : 'Start Coaching'}
+              </Button>
+          </div>
+
+          {(analysisResult || swingCount > 0) && (
+            <div className="mt-6 space-y-4">
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl text-center">
+                    <p className="text-lg font-semibold text-slate-500 dark:text-slate-400">Swings Detected</p>
+                    <p className="text-6xl font-bold text-slate-900 dark:text-slate-100">{swingCount}</p>
+                </div>
+
+                {analysisResult && (
+                    <div className="p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 animate-in fade-in-50 duration-500">
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-2 flex items-center">
+                        <Mic className="w-5 h-5 mr-2 text-blue-500"/>
+                        Coach's Feedback
+                    </h3>
+                    <p className="text-slate-700 dark:text-slate-300 text-xl">
+                        {analysisResult.feedback}
+                    </p>
+                    </div>
+                )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+       <footer className="mt-6 text-center text-sm text-gray-500">
+        <p>For best results, use a secure (HTTPS) connection.</p>
       </footer>
-    </div>
+    </main>
   );
 }
