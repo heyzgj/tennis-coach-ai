@@ -4,74 +4,50 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision';
 import { TennisMetricsCalculator } from '@/lib/tennis-metrics';
 import type { Pose, Metrics } from '@/lib/types';
+import { evaluateMetrics } from '@/lib/feedback';
 
-type Result = { feedback: string; metrics: Metrics } | null;
+type Result = { feedback: string; score: number; metrics: Metrics } | null;
 
 export const useTennisCoach = () => {
-  const [status, setStatus] = useState('Initializing...');
+  // UI 状态
+  const [status, setStatus] = useState('Initializing…');
   const [detecting, setDetecting] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
   const [initialized, setInitialized] = useState(false);
-
   const [swingCount, setSwingCount] = useState(0);
   const [result, setResult] = useState<Result>(null);
 
-  // refs
+  // 推理依赖
   const poseLM = useRef<PoseLandmarker | null>(null);
-  const lastTS = useRef(0);
   const seq = useRef<Pose[]>([]);
   const triggered = useRef(false);
+  const lastTS = useRef(0);
 
-  // Audio playback with 1-line cache to avoid duplicate requests
-  const audioQ = useRef<Blob[]>([]);
-  const playing = useRef(false);
-  const cache = useRef<Map<string, Blob>>(new Map());
+  // SpeechSynthesis 播放队列
+  const queue = useRef<string[]>([]);
+  const speakBusy = useRef(false);
 
-  const playNext = useCallback(() => {
-    if (playing.current || !audioQ.current.length) return;
-    const blob = audioQ.current.shift()!;
-    playing.current = true;
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    audio.onended = () => {
-      playing.current = false;
-      URL.revokeObjectURL(url);
-      playNext();
-    };
-    audio.onerror = () => {
-      playing.current = false;
-      URL.revokeObjectURL(url);
-      playNext();
-    };
-    audio.play().catch(() => {
-      playing.current = false;
-      URL.revokeObjectURL(url);
-      playNext();
-    });
-  }, []);
+  // ---------- Speech helpers ----------
+  function speak(text: string) {
+    if (!('speechSynthesis' in window)) return;
+    queue.current.push(text);
+    playQueue();
+  }
 
-  const speak = useCallback(
-    async (text: string) => {
-      if (cache.current.has(text)) {
-        audioQ.current.push(cache.current.get(text)!);
-        playNext();
-        return;
-      }
-      const r = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      if (!r.ok) return;
-      const blob = await r.blob();
-      cache.current.set(text, blob);
-      audioQ.current.push(blob);
-      playNext();
-    },
-    [playNext]
-  );
+  function playQueue() {
+    if (speakBusy.current || !queue.current.length) return;
+    const utt = new SpeechSynthesisUtterance(queue.current.shift()!);
+    utt.lang = 'zh-CN';
+    // 选一个更自然的中文女声（iOS 通常叫 Ting / Xiao）
+    const voice = speechSynthesis.getVoices()
+      .find(v => v.lang.startsWith('zh') && /Ting|Xiao/i.test(v.name));
+    if (voice) utt.voice = voice;
+    speakBusy.current = true;
+    utt.onend = () => { speakBusy.current = false; playQueue(); };
+    speechSynthesis.cancel();          // 打断上条
+    speechSynthesis.speak(utt);
+  }
 
-  // ▼ Initialize
+  // ---------- 初始化 ----------
   useEffect(() => {
     const init = async () => {
       setStatus('Loading models…');
@@ -93,69 +69,58 @@ export const useTennisCoach = () => {
     init().catch(() => setStatus('Init failed'));
   }, []);
 
-  // ▼ Call analysis
-  const analyze = useCallback(
-    async (poses: Pose[]) => {
-      setAnalyzing(true);
-      setStatus('Analyzing…');
+  // ---------- Swing 解析 ----------
+  const MIN_FRAMES = 15;      // 收集 ≥15 帧再分析
+  const isValid = (m: Metrics) =>
+    m.maxShoulderTurn > 10 &&
+    m.peakArmSpeed > 20 &&
+    m.contactMetrics.distanceFromCore > 10;
 
-      const metrics = TennisMetricsCalculator.calculateMetrics(poses);
-      const fd = new FormData();
-      fd.append('metrics', JSON.stringify(metrics));
+  const analyze = useCallback((poses: Pose[]) => {
+    const metrics = TennisMetricsCalculator.calculateMetrics(poses);
+    if (!isValid(metrics)) {
+      setStatus('Need more data…');    // 不播语音
+      return;
+    }
+    const { feedback, score } = evaluateMetrics(metrics);
+    speak(feedback);
+    setResult({ feedback, score, metrics });
+    setStatus('Ready');
+  }, []);
 
-      try {
-        const r = await fetch('/api/analyze', { method: 'POST', body: fd });
-        const json = await r.json();
-        if (json.feedback) await speak(json.feedback);
-        setResult({ feedback: json.feedback, metrics });
-      } catch (e) {
-        await speak('抱歉，分析失败，请再试一次。');
-      } finally {
-        setAnalyzing(false);
-        setStatus('Ready');
+  // ---------- 视频帧循环 ----------
+  const onFrame = useCallback((video: HTMLVideoElement) => {
+    if (!detecting || !initialized || !poseLM.current) return;
+
+    const now = performance.now();
+    if (now - lastTS.current < 67) return;   // ~15 fps
+    lastTS.current = now;
+
+    const res = poseLM.current.detectForVideo(video, now);
+    if (!res?.landmarks[0]) return;
+
+    const pose: Pose = { ts: now, points: res.landmarks[0] };
+
+    if (triggered.current) {
+      seq.current.push(pose);
+      if (seq.current.length >= MIN_FRAMES) {
+        analyze(seq.current.slice());
+        triggered.current = false;
       }
-    },
-    [speak]
-  );
+      return;
+    }
 
-  // ▼ Video frame loop
-  const onFrame = useCallback(
-    (video: HTMLVideoElement) => {
-      if (!detecting || analyzing || !initialized || !poseLM.current) return;
+    // 用腕速度 + 肩角速度触发
+    if (seq.current.length) seq.current.shift();
+    seq.current.push(pose);
 
-      const now = performance.now();
-      if (now - lastTS.current < 67) return;
-      lastTS.current = now;
-
-      const res = poseLM.current.detectForVideo(video, now);
-      if (!res?.landmarks[0]) return;
-
-      const pose: Pose = { ts: now, points: res.landmarks[0] };
-
-      if (triggered.current) {
-        seq.current.push(pose);
-        if (seq.current.length > 10) {
-          analyze(seq.current.slice());
-          triggered.current = false;
-        }
-        return;
-      }
-
-      const recent = [...seq.current.slice(-2), pose];
-      seq.current = recent;
-      if (recent.length < 3) return;
-
-      const cur = recent[2],
-        prev = recent[1];
-      const wrist = cur.points[16],
-        wristPrev = prev.points[16];
-      const lS = cur.points[11],
-        rS = cur.points[12],
-        lSPrev = prev.points[11],
-        rSPrev = prev.points[12];
+    if (seq.current.length >= 3) {
+      const cur = seq.current[2], prev = seq.current[1];
+      const wrist = cur.points[16], wristPrev = prev.points[16];
+      const lS = cur.points[11], rS = cur.points[12];
+      const lSPrev = prev.points[11], rSPrev = prev.points[12];
       const dt = (cur.ts - prev.ts) / 1000;
       if (dt <= 0) return;
-
       const v =
         Math.hypot(wrist.x - wristPrev.x, wrist.y - wristPrev.y) / dt;
       let ang =
@@ -168,13 +133,12 @@ export const useTennisCoach = () => {
       if (v > 1.5 && av > 2.5) {
         triggered.current = true;
         seq.current = [cur];
-        setSwingCount((n) => n + 1); // 即刻计数
+        setSwingCount(c => c + 1);
       }
-    },
-    [detecting, analyzing, initialized, analyze]
-  );
+    }
+  }, [detecting, initialized, analyze]);
 
-  // ▼ Control functions
+  // ---------- 控制 ----------
   const start = () => {
     if (!initialized) return;
     setDetecting(true);
@@ -186,14 +150,13 @@ export const useTennisCoach = () => {
   const stop = () => {
     setDetecting(false);
     setStatus('Stopped');
-    audioQ.current = [];
-    playing.current = false;
+    speechSynthesis.cancel();
+    queue.current = [];
   };
 
   return {
     status,
     isDetecting: detecting,
-    isAnalyzing: analyzing,
     isInitialized: initialized,
     swingCount,
     analysisResult: result,
