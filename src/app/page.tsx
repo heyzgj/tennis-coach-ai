@@ -2,123 +2,168 @@
 'use client';
 
 import { useTennisCoach } from '@/hooks/useTennisCoach';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Loader2, Mic, Play, Square, Target } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Play, Square, Target } from 'lucide-react';
 import { useCallback, useRef, useEffect } from 'react';
 
-// A self-contained CameraFeed component
-const CameraFeed = ({ onFrame, isDetecting }: { onFrame: (video: HTMLVideoElement) => void, isDetecting: boolean }) => {
+/* ---------- CameraFeed ---------- */
+const CameraFeed = ({
+  onFrame,
+  isDetecting,
+}: {
+  onFrame: (video: HTMLVideoElement) => void;
+  isDetecting: boolean;
+}) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const animationFrameRef = useRef<number>(0);
+  const rafRef = useRef<number>(0);
 
-  const detectionLoop = useCallback(() => {
-    if (videoRef.current) {
-      onFrame(videoRef.current);
-    }
-    animationFrameRef.current = requestAnimationFrame(detectionLoop);
+  // 每帧回调
+  const loop = useCallback(() => {
+    if (videoRef.current) onFrame(videoRef.current);
+    rafRef.current = requestAnimationFrame(loop);
   }, [onFrame]);
 
   useEffect(() => {
-    const startCamera = async () => {
+    const start = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: 'user',
+          },
           audio: false,
         });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
-          animationFrameRef.current = requestAnimationFrame(detectionLoop);
+          rafRef.current = requestAnimationFrame(loop);
         }
-      } catch (err) {
-        alert("Camera Error: Could not access camera. Please use a secure (HTTPS) connection and grant permissions.");
+      } catch {
+        alert(
+          'Camera error. 请使用 HTTPS 打开并授权摄像头。'
+        );
       }
     };
 
-    const stopCamera = () => {
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-      if (videoRef.current && videoRef.current.srcObject) {
-        (videoRef.current.srcObject as MediaStream).getTracks().forEach(track => track.stop());
+    const stop = () => {
+      cancelAnimationFrame(rafRef.current);
+      if (videoRef.current?.srcObject) {
+        (videoRef.current.srcObject as MediaStream)
+          .getTracks()
+          .forEach((t) => t.stop());
       }
     };
 
-    if (isDetecting) {
-      startCamera();
-    } else {
-      stopCamera();
-    }
-    return () => stopCamera();
-  }, [isDetecting, detectionLoop]);
+    isDetecting ? start() : stop();
+    return () => stop();
+  }, [isDetecting, loop]);
 
-  return <video ref={videoRef} playsInline muted className="w-full h-full object-cover transform -scale-x-100" />;
-}
+  return (
+    <video
+      ref={videoRef}
+      playsInline
+      muted
+      className="w-full h-full object-cover transform -scale-x-100 relative z-0"
+    />
+  );
+};
 
+/* ---------- Page ---------- */
 export default function Home() {
   const {
-    status, isDetecting, isAnalyzing, isInitialized, swingCount,
-    analysisResult, startDetection, stopDetection, handleFrame
+    status,
+    isDetecting,
+    isInitialized,
+    swingCount,
+    analysisResult,
+    startDetection,
+    stopDetection,
+    handleFrame,
+    setDbgCanvas,
   } = useTennisCoach();
 
   return (
     <main className="flex min-h-screen w-full flex-col items-center justify-center bg-slate-100 dark:bg-slate-900 p-4 font-sans">
       <Card className="w-full max-w-2xl shadow-2xl border-slate-200/50 dark:border-slate-700/50">
         <CardHeader className="text-center pb-4">
-          <CardTitle className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
+          <CardTitle className="text-3xl font-bold text-slate-900 dark:text-slate-50">
             AI Tennis Coach
           </CardTitle>
-          <p className="text-base text-slate-500 dark:text-slate-400 h-6 transition-all">
+          <p className="h-6 text-base text-slate-500 dark:text-slate-400">
             {status}
           </p>
         </CardHeader>
+
         <CardContent>
+          {/* Camera preview */}
           <div className="relative w-full aspect-video bg-slate-900 rounded-xl overflow-hidden mb-6 shadow-inner">
             <CameraFeed onFrame={handleFrame} isDetecting={isDetecting} />
+            <canvas
+             ref={setDbgCanvas}
+             className="absolute top-0 left-0 w-full h-full pointer-events-none z-40"
+             style={{ transform:'scaleX(-1)' }}
+             />
             {isDetecting && (
-              <div className="absolute top-3 left-3 flex items-center gap-2 bg-red-600 text-white px-3 py-1 rounded-full text-sm font-bold">
+              <div className="absolute top-3 left-3 flex items-center gap-2 bg-red-600 text-white px-3 py-1 rounded-full text-sm font-bold z-50">
                 <Target className="w-4 h-4" />
                 <span>REC</span>
               </div>
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-              <Button
-                onClick={isDetecting ? stopDetection : startDetection}
-                disabled={!isInitialized || isAnalyzing}
-                size="lg"
-                className={`w-full text-xl font-bold py-8 rounded-xl transition-all duration-300 shadow-lg col-span-2 ${isDetecting ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-600 hover:bg-blue-700'} text-white`}
-              >
-                {isAnalyzing ? <Loader2 className="h-8 w-8 animate-spin" /> : 
-                isDetecting ? <Square className="h-8 w-8 mr-2" /> : 
-                <Play className="h-8 w-8 mr-2" />}
-                {isAnalyzing ? 'Analyzing...' : isDetecting ? 'Stop Session' : 'Start Coaching'}
-              </Button>
-          </div>
+          {/* Start / Stop button */}
+          <Button
+            onClick={isDetecting ? stopDetection : startDetection}
+            disabled={!isInitialized}
+            size="lg"
+            className={`w-full text-xl font-bold py-8 rounded-xl transition-all duration-300 shadow-lg ${
+              isDetecting
+                ? 'bg-red-500 hover:bg-red-600'
+                : 'bg-blue-600 hover:bg-blue-700'
+            } text-white`}
+          >
+            {isDetecting ? (
+              <>
+                <Square className="h-8 w-8 mr-2" />
+                Stop Session
+              </>
+            ) : (
+              <>
+                <Play className="h-8 w-8 mr-2" />
+                Start Coaching
+              </>
+            )}
+          </Button>
 
+          {/* Swing count & feedback */}
           {(analysisResult || swingCount > 0) && (
             <div className="mt-6 space-y-4">
-                <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl text-center">
-                    <p className="text-lg font-semibold text-slate-500 dark:text-slate-400">Swings Detected</p>
-                    <p className="text-6xl font-bold text-slate-900 dark:text-slate-100">{swingCount}</p>
-                </div>
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl text-center">
+                <p className="text-lg font-semibold text-slate-500 dark:text-slate-400">
+                  Swings Detected
+                </p>
+                <p className="text-6xl font-bold text-slate-900 dark:text-slate-100">
+                  {swingCount}
+                </p>
+              </div>
 
-                {analysisResult && (
-                    <div className="p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 animate-in fade-in-50 duration-500">
-                    <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-2 flex items-center">
-                        <Mic className="w-5 h-5 mr-2 text-blue-500"/>
-                        Coach's Feedback
-                    </h3>
-                    <p className="text-slate-700 dark:text-slate-300 text-xl">
-                        {analysisResult.feedback}
-                    </p>
-                    </div>
-                )}
+              {analysisResult && (
+                <div className="p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 animate-in fade-in-50 duration-500">
+                  <h3 className="text-lg font-semibold mb-2">反馈</h3>
+                  <p className="text-xl">{analysisResult.feedback}</p>
+                  <p className="text-sm text-slate-500 mt-1">
+                    综合分：{analysisResult.score}
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
       </Card>
-       <footer className="mt-6 text-center text-sm text-gray-500">
+
+      <footer className="mt-6 text-center text-sm text-gray-500">
         <p>For best results, use a secure (HTTPS) connection.</p>
       </footer>
     </main>

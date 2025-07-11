@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chrome TTS 功能测试 (修正版)</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f2f5;
+        }
+        .container {
+            background-color: #fff;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            width: 90%;
+            max-width: 500px;
+        }
+        h1 {
+            color: #333;
+        }
+        textarea {
+            width: 100%;
+            padding: 0.5rem;
+            margin-top: 1rem;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-size: 1rem;
+            min-height: 100px;
+            resize: vertical;
+        }
+        button {
+            background-color: #007aff;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            font-size: 1rem;
+            cursor: pointer;
+            margin-top: 1rem;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #voice-select-wrapper {
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Chrome TTS 功能测试</h1>
+        <p>在下方输入框中输入文本，然后点击“朗读”按钮来测试你 Mac 上的系统 TTS 功能。</p>
+        
+        <textarea id="text-to-speak" rows="4">你好，世界！Hello world! 这是在你的 Mac Air M1 上，通过 Chrome 浏览器进行的文本转语音测试。</textarea>
+
+        <div id="voice-select-wrapper">
+            <label for="voice-select">选择一个声音：</label>
+            <select id="voice-select"></select>
+        </div>
+
+        <button id="speak-button">朗读</button>
+    </div>
+
+    <script>
+        // 确保在DOM加载完成后再执行脚本
+        document.addEventListener('DOMContentLoaded', () => {
+            // 检查浏览器是否支持 SpeechSynthesis API
+            if ('speechSynthesis' in window) {
+                const synth = window.speechSynthesis;
+                const textToSpeak = document.getElementById('text-to-speak');
+                const speakButton = document.getElementById('speak-button');
+                const voiceSelect = document.getElementById('voice-select');
+
+                let voices = [];
+
+                function populateVoiceList() {
+                    voices = synth.getVoices();
+                    const currentSelection = voiceSelect.value;
+                    voiceSelect.innerHTML = ''; 
+
+                    voices.forEach(voice => {
+                        if(voice.lang.startsWith('zh') || voice.lang.startsWith('en')) {
+                            const option = document.createElement('option');
+                            option.textContent = `${voice.name} (${voice.lang})`;
+                            
+                            if(voice.default) {
+                              option.textContent += ' -- 默认';
+                            }
+                
+                            option.setAttribute('data-lang', voice.lang);
+                            option.setAttribute('data-name', voice.name);
+                            voiceSelect.appendChild(option);
+                        }
+                    });
+                    voiceSelect.value = currentSelection;
+                }
+
+                populateVoiceList();
+                if (synth.onvoiceschanged !== undefined) {
+                    synth.onvoiceschanged = populateVoiceList;
+                }
+
+                speakButton.addEventListener('click', () => {
+                    // **关键改动**：在朗读前，先取消任何正在进行的或卡住的语音
+                    synth.cancel(); 
+
+                    if (textToSpeak.value !== '') {
+                        const utterance = new SpeechSynthesisUtterance(textToSpeak.value);
+                        
+                        const selectedOption = voiceSelect.selectedOptions[0].getAttribute('data-name');
+                        const selectedVoice = voices.find(voice => voice.name === selectedOption);
+                        if (selectedVoice) {
+                            utterance.voice = selectedVoice;
+                        }
+
+                        utterance.onend = () => {
+                            console.log('语音播放结束。');
+                        };
+
+                        utterance.onerror = (event) => {
+                            console.error('语音合成发生错误：', event.error);
+                        };
+
+                        // 延迟一小段时间再朗读，有时可以解决初始化问题
+                        setTimeout(() => {
+                            synth.speak(utterance);
+                        }, 100);
+                    }
+                });
+
+            } else {
+                alert('抱歉，你的浏览器不支持文本转语音功能。');
+            }
+        });
+    </script>
+
+</body>
+</html>
