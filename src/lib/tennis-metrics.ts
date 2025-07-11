@@ -56,23 +56,24 @@ export class TennisMetricsCalculator {
    * @returns The maximum rotation in degrees.
    */
   private static _calculateMaxShoulderTurn(poses: Pose[]): number {
-    let maxTurn = 0;
-    for (const pose of poses) {
-      const leftShoulder = pose.points[PoseLandmarkIndex.LEFT_SHOULDER];
-      const rightShoulder = pose.points[PoseLandmarkIndex.RIGHT_SHOULDER];
-      const leftHip = pose.points[PoseLandmarkIndex.LEFT_HIP];
-      const rightHip = pose.points[PoseLandmarkIndex.RIGHT_HIP];
-
-      if (this._areLandmarksVisible([leftShoulder, rightShoulder, leftHip, rightHip])) {
-        const shoulderVector = this._calculateVector(leftShoulder, rightShoulder);
-        const hipVector = this._calculateVector(leftHip, rightHip);
-        const angle = this._calculateAngleBetweenVectors(shoulderVector, hipVector);
-        if (angle > maxTurn) {
-          maxTurn = angle;
-        }
-      }
+    const yaws:number[] = [];
+  
+    for(const p of poses){
+      const L = p.points[PoseLandmarkIndex.LEFT_SHOULDER];
+      const R = p.points[PoseLandmarkIndex.RIGHT_SHOULDER];
+      if(!this._areLandmarksVisible([L,R])) continue;
+  
+      /* 肩线在 X-Z 平面的朝向角 */
+      const dx = R.x-L.x, dz = R.z-L.z;
+      yaws.push(Math.atan2(dx,dz));   // −π…π
     }
-    return Math.round(maxTurn);
+    if(yaws.length<2) return 0;
+  
+    const max = Math.max(...yaws);
+    const min = Math.min(...yaws);
+    let delta = max-min;
+    if(delta<0) delta+=2*Math.PI;
+    return Math.round(delta*180/Math.PI);  // 度数
   }
 
   /**

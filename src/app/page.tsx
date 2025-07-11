@@ -65,7 +65,7 @@ const CameraFeed = ({
       ref={videoRef}
       playsInline
       muted
-      className="w-full h-full object-cover transform -scale-x-100"
+      className="w-full h-full object-cover transform -scale-x-100 relative z-0"
     />
   );
 };
@@ -81,6 +81,7 @@ export default function Home() {
     startDetection,
     stopDetection,
     handleFrame,
+    setDbgCanvas,
   } = useTennisCoach();
 
   return (
@@ -99,8 +100,13 @@ export default function Home() {
           {/* Camera preview */}
           <div className="relative w-full aspect-video bg-slate-900 rounded-xl overflow-hidden mb-6 shadow-inner">
             <CameraFeed onFrame={handleFrame} isDetecting={isDetecting} />
+            <canvas
+             ref={setDbgCanvas}
+             className="absolute top-0 left-0 w-full h-full pointer-events-none z-40"
+             style={{ transform:'scaleX(-1)' }}
+             />
             {isDetecting && (
-              <div className="absolute top-3 left-3 flex items-center gap-2 bg-red-600 text-white px-3 py-1 rounded-full text-sm font-bold">
+              <div className="absolute top-3 left-3 flex items-center gap-2 bg-red-600 text-white px-3 py-1 rounded-full text-sm font-bold z-50">
                 <Target className="w-4 h-4" />
                 <span>REC</span>
               </div>
